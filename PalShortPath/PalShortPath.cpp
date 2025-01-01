@@ -63,6 +63,30 @@ void InitSetting(int* pCombMaxNum, int* pNodeMaxNum, int* pLinkBufferMaxNum) {
 
 }
 
+void CopyWithTrim(wchar_t* dst, int dstSize, const wchar_t* src) {    
+    int startSpaceNum = 0;
+    int endSpaceNum = 0;
+
+    int srcLen = wcslen(src);
+    for (int i = 0; i < srcLen; i++) {
+        if (src[i] != L' ') {
+            break;
+        }
+
+        startSpaceNum++;
+    }
+
+    for (int i = srcLen - 1; i >= 0; i--) {
+        if (src[i] != L' ') {
+            break;
+        }
+
+        endSpaceNum++;
+    }
+    
+    wcsncpy_s(dst, dstSize, src + startSpaceNum, srcLen - endSpaceNum);
+}
+
 bool ReadFile(int* pCombNum, Comb* pCombs, int combCapacity, const wchar_t* path, const wchar_t** pErrMsg) {
     if (pCombs == nullptr || pCombNum == nullptr) {
         return false;
@@ -107,10 +131,10 @@ bool ReadFile(int* pCombNum, Comb* pCombs, int combCapacity, const wchar_t* path
             return false;
         }
 
-        Comb comb;
-        wcscpy_s(comb.parents[0], parents[0]);
-        wcscpy_s(comb.parents[1], parents[1]);
-        wcscpy_s(comb.child, child);
+        Comb comb;        
+        CopyWithTrim(comb.parents[0], NAME_LEN, parents[0]);
+        CopyWithTrim(comb.parents[1], NAME_LEN, parents[1]);
+        CopyWithTrim(comb.child, NAME_LEN, child);
         
         pCombs[combIdx++] = comb;        
     }    
