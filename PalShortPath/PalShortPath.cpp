@@ -2,66 +2,46 @@
 #include <vector>
 #include <fstream>
 #include <queue>
+#include <map>
+#include "Queue.hpp"
 
 using namespace std;
 
 static const int NAME_LEN = 32;
 static const wchar_t* DELIMITER = L"+= ";
 static const wchar_t* INPUT_PATH = L"./교배식.txt";
+static const int MAX_PAL_NUM = 200;
+
+struct CmpStr
+{
+    bool operator()(const wchar_t* const a, const wchar_t* const b) const
+    {
+        return std::wcscmp(a, b) < 0;
+    }
+};
 
 struct Comb {
-    wchar_t parents[2][NAME_LEN];
-    wchar_t child[NAME_LEN];
+    const wchar_t* parents[2];
+    const wchar_t* child;    
 };
 
 struct Node {
-    const wchar_t* name;
-    vector<const wchar_t*> spouses;
-    vector<const wchar_t*> childs;
+    struct Breed {
+        const wchar_t* spouse;
+        const wchar_t* child;
+    };
+
+    const wchar_t* name;    
+    Breed breeds[MAX_PAL_NUM];
+    int breedNum;
 };
 
 struct Link {
-    Node* pNext;
-    Link* pPrevLink;
+    int nodeIdx;
+    int prevLinkIdx;
+    int prevChildIdx;
     int linkNum;
 };
-
-
-void InitSetting(int* pCombMaxNum, int* pNodeMaxNum, int* pLinkBufferMaxNum) {
-    // init setting
-    *pCombMaxNum = 4096;
-    *pNodeMaxNum = 200;
-    *pLinkBufferMaxNum = 2048;
-
-    // overlay setting
-    ifstream settingFile("./setting.txt");
-    if (settingFile.is_open() == true) {
-        const int bufferLen = 1024;
-        char buffer[bufferLen];
-        while (settingFile.eof() == false) {
-            settingFile.getline(buffer, bufferLen);
-
-            char* remain;
-            char* tok = strtok_s(buffer, ": ", &remain);
-            if (tok == nullptr || remain == nullptr) {
-                continue;
-            }
-
-            if (strcmp(tok, "COMB_MAX_NUM") == 0) {
-                *pCombMaxNum = atoi(remain);
-            }
-            else if (strcmp(tok, "NODE_MAX_NUM") == 0) {
-                *pNodeMaxNum = atoi(remain);
-            }
-            else if (strcmp(tok, "LINK_BUFFER_MAX_NUM") == 0) {
-                *pLinkBufferMaxNum = atoi(remain);
-            }
-        }
-
-        settingFile.close();
-    }
-
-}
 
 void CopyWithTrim(wchar_t* dst, int dstSize, const wchar_t* src) {    
     int startSpaceNum = 0;
@@ -87,8 +67,55 @@ void CopyWithTrim(wchar_t* dst, int dstSize, const wchar_t* src) {
     wcsncpy_s(dst, dstSize, src + startSpaceNum, srcLen - endSpaceNum);
 }
 
-bool ReadFile(int* pCombNum, Comb* pCombs, int combCapacity, const wchar_t* path, const wchar_t** pErrMsg) {
-    if (pCombs == nullptr || pCombNum == nullptr) {
+wchar_t* TokenizeWCS(wchar_t* str, const wchar_t* delimiter, wchar_t** context) {
+    int delimiterLen = wcslen(delimiter);
+    
+    int delimStartIdx = -1;
+    int delimEndIdx = -1;
+
+    for (int i = 0; str[i] != L'\0'; i++) {
+        for (int delimIdx = 0; delimIdx < delimiterLen; delimIdx++) {
+            if (str[i] == delimiter[delimIdx]) {
+                delimStartIdx = i;
+                break;
+            }            
+        }
+
+        if (delimStartIdx != -1) {
+            break;
+        }
+    }
+
+    if (delimStartIdx == -1) {
+        *context = nullptr;
+        return str;
+    }
+
+    if (delimStartIdx != -1) {
+        for (int i = delimStartIdx; str[i] != L'\0'; i++) {
+            bool isDelim = false;
+            for (int delimIdx = 0; delimIdx < delimiterLen; delimIdx++) {
+                if (str[i] == delimiter[delimIdx]) {
+                    isDelim = true;
+                    break;
+                }
+            }
+
+            if (isDelim == false) {
+                delimEndIdx = i - 1;
+                break;
+            }
+        }
+    }
+    
+    str[delimStartIdx] = L'\0';
+    *context = str + delimEndIdx + 1;
+
+    return str;    
+}
+
+bool ReadFile(int* pNameBufferLen, wchar_t(*nameBuffer)[NAME_LEN], int nameBufferCapacity, vector<Comb>& combs, const wchar_t* path, const wchar_t** pErrMsg) {
+    if (nameBuffer == nullptr || pNameBufferLen == nullptr) {
         return false;
     }
 
@@ -99,9 +126,11 @@ bool ReadFile(int* pCombNum, Comb* pCombs, int combCapacity, const wchar_t* path
         return false;
     }
 
+    map<const wchar_t*, int, CmpStr> nameByIdx;
+    int nameBufferIdx = 0;
+    
     const int bufferSize = 1024;
     wchar_t* buffer = new wchar_t[bufferSize];
-
     // get combs
     int combIdx = 0;
     int lineIdx = 0;
@@ -112,231 +141,367 @@ bool ReadFile(int* pCombNum, Comb* pCombs, int combCapacity, const wchar_t* path
         wchar_t* parents[2]{ nullptr, };
         wchar_t* child = nullptr;        
         wchar_t* context = nullptr;
-        parents[0] = wcstok_s(buffer, DELIMITER, &context);
+        parents[0] = TokenizeWCS(buffer, DELIMITER, &context);
         if (parents[0] == nullptr || context == nullptr) {
             wcout << lineIdx << "줄에 틀린 형식으로 작성되어있습니다. 이 줄은 무시됩니다." << endl
                 << "내용 : " << buffer << endl;
             continue;
         }
-        parents[1] = wcstok_s(context, DELIMITER, &child);
+        parents[1] = TokenizeWCS(context, DELIMITER, &child);
         if (parents[1] == nullptr || child == nullptr) {
             wcout << lineIdx << "줄에 틀린 형식으로 작성되어있습니다. 이 줄은 무시됩니다." << endl
                 << "내용 : " << buffer << endl;
             continue;
         }
 
-        if (combIdx >= combCapacity) {
-            *pErrMsg = L"조합 수 최대치를 넘었습니다. 프로그램을 수정해주세요.";
-            file.close();
-            return false;
+        if (nameByIdx.find(parents[0]) == nameByIdx.end()) {
+            if (nameBufferIdx > nameBufferCapacity) {
+                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
+                return false;
+            }
+
+            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, parents[0]);
+            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
+            nameBufferIdx++;
+        }
+
+        if (nameByIdx.find(parents[1]) == nameByIdx.end()) {
+            if (nameBufferIdx > nameBufferCapacity) {
+                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
+                return false;
+            }
+
+            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, parents[1]);
+            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
+            nameBufferIdx++;
+        }
+
+        if (nameByIdx.find(child) == nameByIdx.end()) {
+            if (nameBufferIdx > nameBufferCapacity) {
+                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
+                return false;
+            }
+
+            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, child);
+            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
+            nameBufferIdx++;
         }
 
         Comb comb;        
-        CopyWithTrim(comb.parents[0], NAME_LEN, parents[0]);
-        CopyWithTrim(comb.parents[1], NAME_LEN, parents[1]);
-        CopyWithTrim(comb.child, NAME_LEN, child);
-        
-        pCombs[combIdx++] = comb;        
+        comb.parents[0] = nameBuffer[nameByIdx[parents[0]]];
+        comb.parents[1] = nameBuffer[nameByIdx[parents[1]]];
+        comb.child = nameBuffer[nameByIdx[child]];
+        combs.push_back(comb);
+          
     }    
 
-    *pCombNum = combIdx;
+    // check if comb is valid
+    vector<int> duplicateCombIndices;
+    vector<pair<int, int>> notValidCombPair;
+    for (int i = 0; i < combs.size(); i++) {
+        Comb& comb1 = combs[i];
+        for (int j = i + 1; j < combs.size(); j++) {
+            Comb& comb2 = combs[j];
+
+            bool isSameComb =
+                (wcscmp(comb1.parents[0], comb2.parents[0]) == 0 && wcscmp(comb1.parents[1], comb2.parents[1]) == 0)
+                || (wcscmp(comb1.parents[0], comb2.parents[1]) == 0 && wcscmp(comb1.parents[1], comb2.parents[0]) == 0);
+
+            if (isSameComb == false)
+                continue;
+
+            if (wcscmp(comb1.child, comb2.child) != 0) {
+                notValidCombPair.push_back({ i, j });
+            }
+            else {
+                duplicateCombIndices.push_back(j);
+            }
+        }
+    }
+
+    if (notValidCombPair.size() > 0) {        
+        wcout << L"겹치는 교배식이 존재합니다. 교배식을 수정해주세요." << endl;
+        for (int i = 0; i < notValidCombPair.size(); i++) {
+            Comb& comb1 = combs[notValidCombPair[i].first];
+            Comb& comb2 = combs[notValidCombPair[i].second];
+
+            wcout << (i + 1) << endl;
+            wcout << comb1.parents[0] << "+" << comb1.parents[1] << "=" << comb1.child << endl;
+            wcout << comb2.parents[0] << "+" << comb2.parents[1] << "=" << comb2.child << endl;
+        }
+
+        *pErrMsg = L"[교배식 오류]";
+
+        return false;
+    }
+
+
+
+    for (int i = 0; i < duplicateCombIndices.size(); i++) {
+        combs[duplicateCombIndices[i]].parents[0] = L"removed";
+        combs[duplicateCombIndices[i]].parents[1] = L"removed";
+        combs[duplicateCombIndices[i]].child = L"removed";
+    }
+
+    *pNameBufferLen = nameBufferIdx;
 
     file.close();
 
     return true;
 }
 
-Node* FindNode(Node* nodes, int nodeNum, const wchar_t* name) {
-    Node* pFinded = nullptr;
-    for (int nodeIdx = 0; nodeIdx < nodeNum; nodeIdx++) {
+int FindNode(vector<Node>& nodes, const wchar_t* name) {
+    int pFindedIdx = -1;
+    for (int nodeIdx = 0; nodeIdx < nodes.size(); nodeIdx++) {
         if (wcscmp(nodes[nodeIdx].name, name) == 0) {
-            pFinded = &nodes[nodeIdx];
+            pFindedIdx = nodeIdx;
             break;
         }
     }
 
-    return pFinded;
+    return pFindedIdx;
 }
 
-bool ConstructNode(int* pNodeNum, Node* nodes, int nodeCapacity, const Comb* combs, int combNum, const wchar_t** pErrMsg) {
-    int nodeNum = 0;
-    for (int combIdx = 0; combIdx < combNum; combIdx++) {
+bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, wchar_t(*nameBuffer)[NAME_LEN], const wchar_t** pErrMsg) {
+    for (int combIdx = 0; combIdx < combs.size(); combIdx++) {
         const Comb& comb = combs[combIdx];
         
-        for (int parentIdx = 0; parentIdx < 2; parentIdx++) {
-            Node* pFinded = FindNode(nodes, nodeNum, comb.parents[parentIdx]);
+        bool isSameParent = wcscmp(comb.parents[0], comb.parents[1]) == 0;
+        int parentNum = isSameParent ? 1 : 2;
 
-            if (pFinded == nullptr) {                
-                if (nodeNum >= nodeCapacity) {
-                    *pErrMsg = L"노드 수 최대치를 넘었습니다. 프로그램을 수정해주세요.";
-                    return false;
-                }
+        for (int parentIdx = 0; parentIdx < parentNum; parentIdx++) {
+            int findNodeIdx = FindNode(nodes, comb.parents[parentIdx]);
 
-                nodes[nodeNum].name = comb.parents[parentIdx];          
-                nodeNum++;
+            if (findNodeIdx == -1) {
+                Node node;
+                node.name = comb.parents[parentIdx];
+                node.breedNum = 0;                
 
-                pFinded = &nodes[nodeNum - 1];
+                nodes.push_back(node);
+
+                findNodeIdx = nodes.size() - 1;
             }
 
-            pFinded->spouses.push_back(comb.parents[parentIdx == 0 ? 1 : 0]);
-            pFinded->childs.push_back(comb.child);
+            Node& findedNode = nodes[findNodeIdx];
+            findedNode.breeds[findedNode.breedNum].spouse = comb.parents[parentIdx == 0 ? 1 : 0];
+            findedNode.breeds[findedNode.breedNum].child = comb.child;
+            findedNode.breedNum++;
         }        
     }
-
-    *pNodeNum = nodeNum;
+    
     return true;
 }
 
-bool SearchShortestPath(Link** ppFindedLink, const wchar_t* searchParent, const wchar_t* searchChild, Node* nodes, int nodeNum, Link* linkBuffer, int linkCapacity, int maxLinkNum, const wchar_t** pErrMsg) {
-    int linkNum = 0;
-    queue<Link*> q;
-    for (int i = 0; i < nodeNum; i++) {
+bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
+    const wchar_t* searchParent,
+    const wchar_t* searchChild,
+    int maxLinkNum,
+    vector<Node>& nodes,    
+    vector<Link>& linkBuffer,
+    Queue<int>& pathLinkIdxQ,
+    const wchar_t** pErrMsg) 
+{        
+    pathLinkIdxQ.Clear();
+    for (int i = 0; i < nodes.size(); i++) {
         if (wcscmp(searchParent, nodes[i].name) == 0) {
-            if (linkNum >= linkCapacity) {
-                *pErrMsg = L"경로 수 최대치를 넘었습니다. 프로그램을 수정해주세요.";
-                return false;
-            }
+            Link newLink;
+            newLink.nodeIdx = i;
+            newLink.prevLinkIdx = -1;
+            newLink.linkNum = 0;
+            newLink.prevChildIdx = -1;
 
-            linkBuffer[linkNum].pNext = &nodes[i];
-            linkBuffer[linkNum].pPrevLink = nullptr;
-            linkBuffer[linkNum].linkNum = 1;
-            linkNum++;
-
-            q.push(&linkBuffer[linkNum - 1]);
+            linkBuffer.push_back(newLink);
+            pathLinkIdxQ.Push(linkBuffer.size() - 1);
         }
     }
 
     // find
-    Link* pFindedLink = nullptr;
-    while (q.empty() == false) {
-        Link* pLink = q.front();
-        q.pop();
+    bool isFind = false;
+    int findedLinkNum = -1;
 
-        if (pLink->linkNum >= maxLinkNum) {
+    while (pathLinkIdxQ.GetLength() != 0) {
+        int linkIdx = pathLinkIdxQ.Pop();
+
+        Link link = linkBuffer[linkIdx];
+
+        // exceed link num
+        if (link.linkNum >= maxLinkNum
+            || (isFind && link.linkNum > findedLinkNum)) {
             continue;
         }
 
-        Node* pNode = pLink->pNext;
-        int childNum = pNode->childs.size();
+        // finded path       
+        // link of which link Num is 0 is just for start queue, and not a breeding info. so skip
+        if (link.linkNum != 0) {
+            if (wcscmp(nodes[link.nodeIdx].name, searchChild) == 0) {
+                if (isFind == false) {
+                    isFind = true;
+                    findedLinkNum = link.linkNum;
+                }
+
+                pFindedLinkIdxs.push_back(linkIdx);
+                continue;
+            }
+        }      
+
+        Node& node = nodes[link.nodeIdx];
+        int childNum = node.breedNum;
         for (int childIdx = 0; childIdx < childNum; childIdx++) {
-            if (wcscmp(pNode->childs[childIdx], searchChild) == 0) {
-                pFindedLink = pLink;
-                goto findLink;
-            }
-
-            if (linkBuffer[linkNum].linkNum >= maxLinkNum) {
+            // if node doens't have children
+            int nextNodeIdx = FindNode(nodes, node.breeds[childIdx].child);
+            if (nextNodeIdx == -1) {
                 continue;
             }
 
-            Node* pNext = FindNode(nodes, nodeNum, pNode->childs[childIdx]);
-            if (pNext == nullptr) {
-                continue;
-            }
-
-            if (linkNum >= linkCapacity) {
-                *pErrMsg = L"경로 수 최대치를 넘었습니다. 프로그램을 수정해주세요.";
-                return false;
-            }
-
-            linkBuffer[linkNum].pNext = pNext;
-            linkBuffer[linkNum].pPrevLink = pLink;
-            linkBuffer[linkNum].linkNum = pLink->linkNum + 1;
-            linkNum++;
-
-            q.push(&linkBuffer[linkNum - 1]);
+            // new path
+            Link newLink;
+            newLink.nodeIdx = nextNodeIdx;
+            newLink.prevLinkIdx = linkIdx;
+            newLink.linkNum = link.linkNum + 1;
+            newLink.prevChildIdx = childIdx;            
+            linkBuffer.push_back(newLink);
+            pathLinkIdxQ.Push(linkBuffer.size() - 1);
         }        
     }
 
-findLink:
-    *ppFindedLink = pFindedLink;
+
     return true;
 }
 
-void PrintShortestPath(const wchar_t* searchParent, const wchar_t* searchChild, Comb* combs, int combCapacity, Node* nodes, int nodeCapacity, Link* links, int linkCapacity, int maxLinkNum) {    
+void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLinkIdx, const wchar_t* searchParent, const wchar_t* searchChild) {   
+    vector<Link> links;
+
+    // collect links by path order
+    {
+        int linkIdx = findedLinkIdx;
+        while (true) {
+            if (linkIdx == -1) {
+                break;
+            }
+
+            links.push_back(linkBuffer[linkIdx]);
+            linkIdx = linkBuffer[linkIdx].prevLinkIdx;
+        }
+    }
+
+
+    // mid    
+    int linkIdx = 1;
+    const wchar_t* parent = searchParent;
+    // print links by tracing inversely
+    // except first link of which prev link is nullptr
+    for (int i = links.size() - 2; i >= 0; i--) {
+        Link& link = links[i];
+        Link& prevLink = linkBuffer[link.prevLinkIdx];
+        Node& node = nodeBuffer[link.nodeIdx];
+        Node& prevNode = nodeBuffer[prevLink.nodeIdx];
+
+        const wchar_t* child = node.name;
+        const wchar_t* parent1 = prevNode.name;
+        const wchar_t* parent2 = prevNode.breeds[link.prevChildIdx].spouse;
+
+        wcout << linkIdx << "."
+            << "\"" << parent1 << "\"" << L" + " << parent2 << L" = " << child << endl;
+        parent = child;
+        linkIdx++;
+    }
+}
+
+void PrintShortestPath(const wchar_t* searchParent,
+    const wchar_t* searchChild,
+    wchar_t(*nameBuffer)[NAME_LEN],
+    int nameBufferCapacity,
+    vector<Comb>& combBuffer,
+    vector<Node>& nodeBuffer,
+    vector<Link>& linkBuffer,
+    Queue<int>& recycleLinkIdxQ,
+    int maxLinkNum)
+{    
     const wchar_t* errMsg;
 
-    int combNum;
-    bool isSuccess = ReadFile(&combNum, combs, combCapacity, INPUT_PATH, &errMsg);
+    combBuffer.clear();
+    nodeBuffer.clear();
+    linkBuffer.clear();
+    
+    int nameBufferLen;
+    bool isSuccess = ReadFile(&nameBufferLen, nameBuffer, nameBufferCapacity, combBuffer, INPUT_PATH, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
+    // check if search is valid
+    bool isValidParent = false;
+    bool isValidChild = false;
+    for (int i = 0; i < nameBufferLen; i++) {
+        if (wcscmp(nameBuffer[i], searchParent) == 0) {
+            isValidParent = true;
+        }
+
+        if (wcscmp(nameBuffer[i], searchChild) == 0) {
+            isValidChild = true;
+        }
+    }
+    
+    if (isValidParent == false || isValidChild == false) {
+        wcout << L"교배식에 존재하지 않는 종류입니다." << endl;
+        wcout << L"없는 종류: ";
+        if (isValidParent == false) {
+            wcout << searchParent << " ";
+        }
+        if (isValidChild == false) {
+            wcout << searchChild << " ";
+        }
+        wcout << endl;
+
+        return;
+    }
+      
+    // construct node
     int nodeNum;
-    isSuccess = ConstructNode(&nodeNum, nodes, nodeCapacity, combs, combNum, &errMsg);
+    isSuccess = ConstructNode(nodeBuffer, combBuffer, nameBuffer, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
-    // fill first link
-    //  node : link, node : prevNode, int : link num   
-    Link* pFindedLink;
-    isSuccess = SearchShortestPath(&pFindedLink, searchParent, searchChild, nodes, nodeNum, links, linkCapacity, maxLinkNum, &errMsg);
+    // fill first link    
+    vector<int> pFindedLinkIndices;
+    isSuccess = SearchShortestPaths(pFindedLinkIndices, searchParent, searchChild, maxLinkNum, nodeBuffer, linkBuffer, recycleLinkIdxQ, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
     // output
-    if (pFindedLink == nullptr) {
+    if (pFindedLinkIndices.size() == 0) {
         wcout << L"교배식이 없습니다." << endl;
     }
     else {
-        vector<Link*> pLinks;
-        Link* pLink = pFindedLink;
-        while (pLink != nullptr) {
-            pLinks.push_back(pLink);
-            pLink = pLink->pPrevLink;
+        for (int i = 0; i < pFindedLinkIndices.size(); i++) {
+            wcout << L"교배식 " << (i + 1) << endl;
+            PrintPath(nodeBuffer, linkBuffer, pFindedLinkIndices[i], searchParent, searchChild);
+
+            if(i != pFindedLinkIndices.size() - 1)
+                wcout << endl;
         }
-
-        int linkIdx = 1;
-        const wchar_t* parent = searchParent;
-        for (int i = pLinks.size() - 1; i >= 1; i--) {
-            pLink = pLinks[i];
-
-            const wchar_t* child = pLinks[i - 1]->pNext->name;
-            const wchar_t* parent2 = nullptr;
-            for (int childIdx = 0; childIdx < pLink->pNext->childs.size(); childIdx++) {
-                if (wcscmp(pLink->pNext->childs[childIdx], child) == 0) {
-                    parent2 = pLink->pNext->spouses[childIdx];
-                }
-            }
-
-            wcout << linkIdx << "."
-                << "\"" << parent << "\"" << L" + " << parent2 << L" = " << child << endl;
-            parent = child;
-            linkIdx++;
-        }
-
-        const wchar_t* child = searchChild;
-        const wchar_t* parent2 = nullptr;
-        for (int childIdx = 0; childIdx < pLinks[0]->pNext->childs.size(); childIdx++) {
-            if (wcscmp(pLinks[0]->pNext->childs[childIdx], child) == 0) {
-                parent2 = pLinks[0]->pNext->spouses[childIdx];
-            }
-        }
-        wcout << linkIdx << "."
-            << "\"" << parent << "\"" << L" + " << parent2 << L" = " << child << endl;
-
     }
 }
 
 int main()
 {
-    // init setting
-    int COMB_MAX_NUM;
-    int NODE_MAX_NUM;
-    int LINK_BUFFER_MAX_NUM;
-    InitSetting(&COMB_MAX_NUM, &NODE_MAX_NUM, &LINK_BUFFER_MAX_NUM);      
-
+    // init setting    
     // init & alloc
     std::locale::global(std::locale("ko_KR.UTF-8"));
     _wsetlocale(LC_ALL, L"korean");
+    
+    vector<Comb> combBuffer;
+    vector<Node> nodeBuffer;
+    vector<Link> linkBuffer;
+    Queue<int> recycleLinkIdxQ;
 
-    Comb* combs = new Comb[COMB_MAX_NUM];
-    Node* nodes = new Node[NODE_MAX_NUM];
-    Link* links = new Link[LINK_BUFFER_MAX_NUM];
+    const int nameBufferCapacity = 300;
+    wchar_t (*nameBuffer)[NAME_LEN] = new wchar_t[nameBufferCapacity][NAME_LEN];
 
     // summary
     wcout << L"------------ <설명> ------------"<< endl
@@ -347,7 +512,7 @@ int main()
 
     // input
     while (true) {
-        int maxLinkNum = 7;
+        int maxLinkNum = 10;
 
         wchar_t searchParent[NAME_LEN];
         wchar_t searchChild[NAME_LEN];
@@ -366,12 +531,10 @@ int main()
         wcout << L"------------결과------------" << endl;
         
         // output
-        PrintShortestPath(searchParent, searchChild, combs, COMB_MAX_NUM, nodes, NODE_MAX_NUM, links, LINK_BUFFER_MAX_NUM, maxLinkNum);
+        PrintShortestPath(searchParent, searchChild, nameBuffer, nameBufferCapacity, combBuffer, nodeBuffer, linkBuffer, recycleLinkIdxQ, maxLinkNum);
         wcout << L"----------------------------" << endl << endl;
     }      
     
     // dealloc
-    delete[] combs;
-    delete[] nodes;
-    delete[] links;
+    delete[] nameBuffer;
 }
