@@ -1,8 +1,11 @@
-﻿#include <iostream>
+﻿//#define TEST
+
+#include <iostream>
 #include <vector>
 #include <fstream>
 #include <queue>
 #include <map>
+#include <list>
 #include "Queue.hpp"
 #include "PalNameConst.hpp"
 
@@ -44,6 +47,13 @@ struct Link {
     int linkNum;
 };
 
+struct CmpLink {
+    bool operator()(const pair<int, int>& link1, const pair<int, int>& link2) const
+    {
+        return link1.second > link2.second;
+    }
+};
+
 void CopyWithTrim(wchar_t* dst, int dstSize, const wchar_t* src) {    
     int startSpaceNum = 0;
     int endSpaceNum = 0;
@@ -66,6 +76,31 @@ void CopyWithTrim(wchar_t* dst, int dstSize, const wchar_t* src) {
     }
     
     wcsncpy_s(dst, dstSize, src + startSpaceNum, srcLen - endSpaceNum);
+}
+
+void Trim(wchar_t* src) {
+    int startSpaceNum = 0;
+    int endSpaceNum = 0;
+
+    int srcLen = wcslen(src);
+    for (int i = 0; i < srcLen; i++) {
+        if (src[i] != L' ') {
+            break;
+        }
+
+        startSpaceNum++;
+    }
+
+    for (int i = srcLen - 1; i >= 0; i--) {
+        if (src[i] != L' ') {
+            break;
+        }
+
+        endSpaceNum++;
+    }
+
+    src[srcLen - endSpaceNum] = L'\0';
+    src = src + startSpaceNum;
 }
 
 wchar_t* TokenizeWCS(wchar_t* str, const wchar_t* delimiter, wchar_t** context) {
@@ -155,6 +190,10 @@ bool ReadFile(vector<Comb>& combs, map<const wchar_t*, int, CmpStr>& palNameIdxB
         }
 
         // check valid name
+        Trim(parents[0]);
+        Trim(parents[1]);
+        Trim(child);
+
         const wchar_t* names[3]{ parents[0], parents[1], child };
         bool isValidNames[3];
         bool isNameValidInComb = true;
@@ -181,6 +220,7 @@ bool ReadFile(vector<Comb>& combs, map<const wchar_t*, int, CmpStr>& palNameIdxB
             wcout << endl;
 
             isAllNameValid = false;
+            continue;
         }
         
 
@@ -250,19 +290,16 @@ bool ReadFile(vector<Comb>& combs, map<const wchar_t*, int, CmpStr>& palNameIdxB
     return true;
 }
 
-int FindNode(vector<Node>& nodes, const wchar_t* name) {
-    int pFindedIdx = -1;
-    for (int nodeIdx = 0; nodeIdx < nodes.size(); nodeIdx++) {
-        if (wcscmp(nodes[nodeIdx].name, name) == 0) {
-            pFindedIdx = nodeIdx;
-            break;
-        }
-    }
-
-    return pFindedIdx;
+int FindNodeIdx(map<const wchar_t*, int, CmpStr>& palNameIdxByName, const wchar_t* name) {
+    return palNameIdxByName.find(name) == palNameIdxByName.end() ? -1 : palNameIdxByName[name];
 }
 
-bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, const wchar_t** pErrMsg) {
+bool ConstructNode(Node* nodes, map<const wchar_t*, int, CmpStr>& palNameIdxByName, vector<Comb>& combs, const wchar_t** pErrMsg) {
+    for (int i = 0; i < PAL_LEN; i++) {
+        nodes[i].name = PAL_NAMES[i];
+        nodes[i].breedNum = 0;
+    }
+
     for (int combIdx = 0; combIdx < combs.size(); combIdx++) {
         const Comb& comb = combs[combIdx];
         
@@ -270,17 +307,7 @@ bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, const wchar_t** pEr
         int parentNum = isSameParent ? 1 : 2;
 
         for (int parentIdx = 0; parentIdx < parentNum; parentIdx++) {
-            int findNodeIdx = FindNode(nodes, comb.parents[parentIdx]);
-
-            if (findNodeIdx == -1) {
-                Node node;
-                node.name = comb.parents[parentIdx];
-                node.breedNum = 0;                
-
-                nodes.push_back(node);
-
-                findNodeIdx = nodes.size() - 1;
-            }
+            int findNodeIdx = FindNodeIdx(palNameIdxByName, comb.parents[parentIdx]);
 
             Node& findedNode = nodes[findNodeIdx];
             findedNode.breeds[findedNode.breedNum].spouse = comb.parents[parentIdx == 0 ? 1 : 0];
@@ -292,54 +319,54 @@ bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, const wchar_t** pEr
     return true;
 }
 
-bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
+bool SearchShortestPaths(vector<int>& pFindedLinkIndices,
     const wchar_t* searchParent,
     const wchar_t* searchChild,
-    int maxLinkNum,
-    vector<Node>& nodes,    
+    map<const wchar_t*, int, CmpStr> palIdxByName,
+    Node* nodes,    
+    int* reachLinkNums,
     vector<Link>& linkBuffer,
-    Queue<int>& pathLinkIdxQ,
     const wchar_t** pErrMsg) 
 {        
-    pathLinkIdxQ.Clear();
-    for (int i = 0; i < nodes.size(); i++) {
-        if (wcscmp(searchParent, nodes[i].name) == 0) {
-            Link newLink;
-            newLink.nodeIdx = i;
-            newLink.prevLinkIdx = -1;
-            newLink.linkNum = 0;
-            newLink.prevChildIdx = -1;
+    // link index, link num
+    priority_queue<pair<int, int>, vector<pair<int, int>>, CmpLink> pq;    
+    Link newLink;
+    newLink.nodeIdx = FindNodeIdx(palIdxByName, searchParent);
+    newLink.prevLinkIdx = -1;
+    newLink.linkNum = 0;
+    newLink.prevChildIdx = -1;
 
-            linkBuffer.push_back(newLink);
-            pathLinkIdxQ.Push(linkBuffer.size() - 1);
-        }
-    }
+    linkBuffer.push_back(newLink);
+    pq.push({linkBuffer.size() - 1, 0});    
 
     // find
-    bool isFind = false;
+    bool isTargetFind = false;
     int findedLinkNum = -1;
 
-    while (pathLinkIdxQ.GetLength() != 0) {
-        int linkIdx = pathLinkIdxQ.Pop();
+    while (pq.empty() == false) {
+        pair<int, int> linkIdxAndLinkNum = pq.top();        
+        pq.pop();
 
+        int linkIdx = linkIdxAndLinkNum.first;
         Link link = linkBuffer[linkIdx];
 
         // exceed link num
-        if (link.linkNum > maxLinkNum
-            || (isFind && link.linkNum > findedLinkNum)) {
+        if (isTargetFind && link.linkNum > findedLinkNum) {
             continue;
-        }
+        }              
 
-        // finded path       
+        // found path       
         // link of which link Num is 0 is just for start queue, and not a breeding info. so skip
-        if (link.linkNum != 0) {
-            if (wcscmp(nodes[link.nodeIdx].name, searchChild) == 0) {
-                if (isFind == false) {
-                    isFind = true;
-                    findedLinkNum = link.linkNum;
-                }
-
-                pFindedLinkIdxs.push_back(linkIdx);
+        if (link.linkNum != 0) {  
+            if (reachLinkNums[link.nodeIdx] != -1 && reachLinkNums[link.nodeIdx] < link.linkNum) {
+                continue;
+            }
+            
+            reachLinkNums[link.nodeIdx] = link.linkNum;
+            if (wcscmp(nodes[link.nodeIdx].name, searchChild) == 0) {                                            
+                isTargetFind = true;
+                findedLinkNum = link.linkNum;
+                pFindedLinkIndices.push_back(linkIdx);
                 continue;
             }
         }      
@@ -348,7 +375,7 @@ bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
         int childNum = node.breedNum;
         for (int childIdx = 0; childIdx < childNum; childIdx++) {
             // if node doens't have children
-            int nextNodeIdx = FindNode(nodes, node.breeds[childIdx].child);
+            int nextNodeIdx = FindNodeIdx(palIdxByName, node.breeds[childIdx].child);
             if (nextNodeIdx == -1) {
                 continue;
             }
@@ -358,9 +385,9 @@ bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
             newLink.nodeIdx = nextNodeIdx;
             newLink.prevLinkIdx = linkIdx;
             newLink.linkNum = link.linkNum + 1;
-            newLink.prevChildIdx = childIdx;            
-            linkBuffer.push_back(newLink);
-            pathLinkIdxQ.Push(linkBuffer.size() - 1);
+            newLink.prevChildIdx = childIdx;  
+            linkBuffer.push_back(newLink);            
+            pq.push({ linkBuffer.size() - 1, link.linkNum + 1 });
         }        
     }
 
@@ -368,7 +395,13 @@ bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
     return true;
 }
 
-void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLinkIdx, const wchar_t* searchParent, const wchar_t* searchChild) {   
+
+void PrintPaths(int findedLinkIdx,
+    Node* nodes,
+    vector<Link>& linkBuffer,
+    const wchar_t* searchParent,
+    const wchar_t* searchChild)
+{
     vector<Link> links;
 
     // collect links by path order
@@ -384,8 +417,6 @@ void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLin
         }
     }
 
-
-    // mid    
     int linkIdx = 1;
     const wchar_t* parent = searchParent;
     // print links by tracing inversely
@@ -393,8 +424,8 @@ void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLin
     for (int i = links.size() - 2; i >= 0; i--) {
         Link& link = links[i];
         Link& prevLink = linkBuffer[link.prevLinkIdx];
-        Node& node = nodeBuffer[link.nodeIdx];
-        Node& prevNode = nodeBuffer[prevLink.nodeIdx];
+        Node& node = nodes[link.nodeIdx];
+        Node& prevNode = nodes[prevLink.nodeIdx];
 
         const wchar_t* child = node.name;
         const wchar_t* parent1 = prevNode.name;
@@ -407,30 +438,33 @@ void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLin
     }
 }
 
+
+
 void PrintShortestPath(const wchar_t* searchParent,
     const wchar_t* searchChild,
-    map<const wchar_t*, int, CmpStr>& palNameIdxByName,
+    map<const wchar_t*, int, CmpStr>& palIdxByName,
     vector<Comb>& combBuffer,
-    vector<Node>& nodeBuffer,
+    Node* nodes,
     vector<Link>& linkBuffer,
-    Queue<int>& recycleLinkIdxQ,
-    int maxLinkNum)
+    int* reachLinkNums)
 {    
     const wchar_t* errMsg;
 
-    combBuffer.clear();
-    nodeBuffer.clear();
+    // clear
+    combBuffer.clear();    
     linkBuffer.clear();
+    memset(reachLinkNums, -1, sizeof(int) * PAL_LEN);
     
-    bool isSuccess = ReadFile(combBuffer, palNameIdxByName, INPUT_PATH, &errMsg);
+    // read file
+    bool isSuccess = ReadFile(combBuffer, palIdxByName, INPUT_PATH, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
     // check if search is valid
-    bool isValidParent = palNameIdxByName.find(searchParent) != palNameIdxByName.end();
-    bool isValidChild = palNameIdxByName.find(searchChild) != palNameIdxByName.end();
+    bool isValidParent = palIdxByName.find(searchParent) != palIdxByName.end();
+    bool isValidChild = palIdxByName.find(searchChild) != palIdxByName.end();
     
     if (isValidParent == false || isValidChild == false) {
         wcout << L"교배식에 존재하지 않는 종류입니다." << endl;
@@ -448,19 +482,19 @@ void PrintShortestPath(const wchar_t* searchParent,
       
     // construct node
     int nodeNum;
-    isSuccess = ConstructNode(nodeBuffer, combBuffer, &errMsg);
+    isSuccess = ConstructNode(nodes, palIdxByName, combBuffer, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
-    // fill first link    
+    // fill first link        
     vector<int> pFindedLinkIndices;
-    isSuccess = SearchShortestPaths(pFindedLinkIndices, searchParent, searchChild, maxLinkNum, nodeBuffer, linkBuffer, recycleLinkIdxQ, &errMsg);
+    isSuccess = SearchShortestPaths(pFindedLinkIndices, searchParent, searchChild, palIdxByName, nodes, reachLinkNums, linkBuffer, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
-    }
+    }   
 
     // output
     if (pFindedLinkIndices.size() == 0) {
@@ -469,13 +503,60 @@ void PrintShortestPath(const wchar_t* searchParent,
     else {
         for (int i = 0; i < pFindedLinkIndices.size(); i++) {
             wcout << L"교배식 " << (i + 1) << endl;
-            PrintPath(nodeBuffer, linkBuffer, pFindedLinkIndices[i], searchParent, searchChild);
+            PrintPaths(pFindedLinkIndices[i], nodes, linkBuffer, searchParent, searchChild);
 
             if(i != pFindedLinkIndices.size() - 1)
                 wcout << endl;
         }
     }
 }
+
+//void Test(map<const wchar_t*, int, CmpStr>& palNameIdxByName, vector<Comb>& combs, Node* nodes) {
+//    combs.clear();
+//    nodes.clear();
+//
+//    const wchar_t* errMsg;
+//    bool isSuccess = ReadFile(combs, palNameIdxByName, INPUT_PATH, &errMsg);
+//    assert(isSuccess);
+//
+//    isSuccess = ConstructNode(nodes, combs, &errMsg);
+//    assert(isSuccess);
+//
+//    const wchar_t* known1 = L"도로롱";
+//    const wchar_t* known2 = L"유령초";
+//    Node* pKnown1 = nullptr;
+//    for (int i = 0; i < nodes.size(); i++) {
+//        if (wcscmp(nodes[i].name, known1) == 0) {
+//            pKnown1 = &nodes[i];
+//            break;
+//        }
+//    }
+//    assert(pKnown1 != nullptr);
+//
+//    const wchar_t* child = nullptr;
+//    for (int i = 0; i < pKnown1->breedNum; i++) {
+//        if (wcscmp(pKnown1->breeds[i].spouse, known2) == 0) {
+//            child = pKnown1->breeds[i].child;
+//            break;
+//        }
+//    }
+//    assert(child != nullptr);
+//
+//    const wchar_t* spouse = nullptr;
+//    for (int i = 0; i < pKnown1->breedNum; i++) {
+//        if (wcscmp(pKnown1->breeds[i].child, known2) == 0) {
+//            spouse = pKnown1->breeds[i].spouse;
+//            break;
+//        }
+//    }
+//    assert(spouse != nullptr);
+//
+//    const wchar_t* knowns[4] = {
+//        known1, known2, child, spouse
+//    };
+//
+// 
+//}
 
 int main()
 {
@@ -486,14 +567,18 @@ int main()
     
     // init
     vector<Comb> combBuffer;
-    vector<Node> nodeBuffer;
+    Node* nodes = new Node[PAL_LEN];
     vector<Link> linkBuffer;
-    Queue<int> recycleLinkIdxQ;
+    int* reachLinkNums = new int[PAL_LEN];
 
     map<const wchar_t*, int, CmpStr> palNameIdxByName;
     for (int i = 0; i < PAL_LEN; i++) {
         palNameIdxByName.insert({ PAL_NAMES[i], i });
     }
+
+#ifdef TEST
+    Test(palIdxByName, combBuffer, nodeBuffer);
+#endif
 
     // summary
     wcout << L"------------ <설명> ------------"<< endl
@@ -504,7 +589,6 @@ int main()
 
     // input
     while (true) {
-        int maxLinkNum = 8;
 
         wchar_t searchParent[NAME_LEN];
         wchar_t searchChild[NAME_LEN];
@@ -521,10 +605,15 @@ int main()
         wcin >> searchChild;
 
         wcout << L"------------결과------------" << endl;
+
         
         // output
-        PrintShortestPath(searchParent, searchChild, palNameIdxByName, combBuffer, nodeBuffer, linkBuffer, recycleLinkIdxQ, maxLinkNum);
+        PrintShortestPath(searchParent, searchChild, palNameIdxByName, combBuffer, nodes, linkBuffer, reachLinkNums);
         wcout << L"----------------------------" << endl << endl;
-    }      
+    }     
+
+
+    delete[] nodes;
    
 }
+
