@@ -130,6 +130,7 @@
     <ClCompile Include="PalShortPath.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="PalNameConst.hpp" />
     <ClInclude Include="Queue.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -4,6 +4,7 @@
 #include <queue>
 #include <map>
 #include "Queue.hpp"
+#include "PalNameConst.hpp"
 
 using namespace std;
 
@@ -114,30 +115,29 @@ wchar_t* TokenizeWCS(wchar_t* str, const wchar_t* delimiter, wchar_t** context) 
     return str;    
 }
 
-bool ReadFile(int* pNameBufferLen, wchar_t(*nameBuffer)[NAME_LEN], int nameBufferCapacity, vector<Comb>& combs, const wchar_t* path, const wchar_t** pErrMsg) {
-    if (nameBuffer == nullptr || pNameBufferLen == nullptr) {
-        return false;
-    }
+bool IsPalName(const wchar_t* searchName, map<const wchar_t*, int, CmpStr>& palOrderByName) {
+    return palOrderByName.find(searchName) != palOrderByName.end();    
+}
 
+bool ReadFile(vector<Comb>& combs, map<const wchar_t*, int, CmpStr>& palNameIdxByName, const wchar_t* path, const wchar_t** pErrMsg) {
     wifstream file;
     file.open(path);
     if (file.is_open() == false) {
         *pErrMsg = L"입력 파일을 찾지 못했습니다.";        
         return false;
     }
-
-    map<const wchar_t*, int, CmpStr> nameByIdx;
-    int nameBufferIdx = 0;
     
     const int bufferSize = 1024;
     wchar_t* buffer = new wchar_t[bufferSize];
     // get combs
     int combIdx = 0;
     int lineIdx = 0;
+    bool isAllNameValid = true;
     while (file.eof() == false) {        
         file.getline(buffer, bufferSize);
         lineIdx++;
         
+        // tokenize input line
         wchar_t* parents[2]{ nullptr, };
         wchar_t* child = nullptr;        
         wchar_t* context = nullptr;
@@ -154,46 +154,48 @@ bool ReadFile(int* pNameBufferLen, wchar_t(*nameBuffer)[NAME_LEN], int nameBuffe
             continue;
         }
 
-        if (nameByIdx.find(parents[0]) == nameByIdx.end()) {
-            if (nameBufferIdx > nameBufferCapacity) {
-                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
-                return false;
+        // check valid name
+        const wchar_t* names[3]{ parents[0], parents[1], child };
+        bool isValidNames[3];
+        bool isNameValidInComb = true;
+        for (int i = 0; i < 3; i++) {
+            isValidNames[i] = palNameIdxByName.find(names[i]) != palNameIdxByName.end();
+            if (isValidNames[i] == false) {
+                isNameValidInComb = false;
             }
-
-            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, parents[0]);
-            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
-            nameBufferIdx++;
         }
 
-        if (nameByIdx.find(parents[1]) == nameByIdx.end()) {
-            if (nameBufferIdx > nameBufferCapacity) {
-                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
-                return false;
+        if (isNameValidInComb == false) {
+            wcout << lineIdx << L"줄에 작성된 팰 이름이 올바르지 않습니다." << endl;
+            wcout << L"\t내용 : ";
+
+            for (int i = 0; i < 3; i++) {
+                if (isValidNames[i]) {
+                    wcout << names[i];
+                }
+                else {
+                    wcout << L"\"" << names[i] << L"\"";
+                }
+                wcout << L" ";
             }
+            wcout << endl;
 
-            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, parents[1]);
-            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
-            nameBufferIdx++;
+            isAllNameValid = false;
         }
-
-        if (nameByIdx.find(child) == nameByIdx.end()) {
-            if (nameBufferIdx > nameBufferCapacity) {
-                *pErrMsg = L"이름 버퍼에 빈공간이 없습니다. 프로그램을 수정해주세요.";
-                return false;
-            }
-
-            CopyWithTrim(nameBuffer[nameBufferIdx], NAME_LEN, child);
-            nameByIdx.insert({ nameBuffer[nameBufferIdx], nameBufferIdx });
-            nameBufferIdx++;
-        }
+        
 
         Comb comb;        
-        comb.parents[0] = nameBuffer[nameByIdx[parents[0]]];
-        comb.parents[1] = nameBuffer[nameByIdx[parents[1]]];
-        comb.child = nameBuffer[nameByIdx[child]];
+        comb.parents[0] = PAL_NAMES[palNameIdxByName[parents[0]]];
+        comb.parents[1] = PAL_NAMES[palNameIdxByName[parents[1]]];
+        comb.child = PAL_NAMES[palNameIdxByName[child]];
         combs.push_back(comb);
           
     }    
+
+    if (isAllNameValid == false) {
+        *pErrMsg = L"[이름 오류]";
+        return false;
+    }
 
     // check if comb is valid
     vector<int> duplicateCombIndices;
@@ -243,8 +245,6 @@ bool ReadFile(int* pNameBufferLen, wchar_t(*nameBuffer)[NAME_LEN], int nameBuffe
         combs[duplicateCombIndices[i]].child = L"removed";
     }
 
-    *pNameBufferLen = nameBufferIdx;
-
     file.close();
 
     return true;
@@ -262,7 +262,7 @@ int FindNode(vector<Node>& nodes, const wchar_t* name) {
     return pFindedIdx;
 }
 
-bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, wchar_t(*nameBuffer)[NAME_LEN], const wchar_t** pErrMsg) {
+bool ConstructNode(vector<Node>& nodes, vector<Comb>& combs, const wchar_t** pErrMsg) {
     for (int combIdx = 0; combIdx < combs.size(); combIdx++) {
         const Comb& comb = combs[combIdx];
         
@@ -409,8 +409,7 @@ void PrintPath(vector<Node>& nodeBuffer, vector<Link>& linkBuffer, int findedLin
 
 void PrintShortestPath(const wchar_t* searchParent,
     const wchar_t* searchChild,
-    wchar_t(*nameBuffer)[NAME_LEN],
-    int nameBufferCapacity,
+    map<const wchar_t*, int, CmpStr>& palNameIdxByName,
     vector<Comb>& combBuffer,
     vector<Node>& nodeBuffer,
     vector<Link>& linkBuffer,
@@ -423,25 +422,15 @@ void PrintShortestPath(const wchar_t* searchParent,
     nodeBuffer.clear();
     linkBuffer.clear();
     
-    int nameBufferLen;
-    bool isSuccess = ReadFile(&nameBufferLen, nameBuffer, nameBufferCapacity, combBuffer, INPUT_PATH, &errMsg);
+    bool isSuccess = ReadFile(combBuffer, palNameIdxByName, INPUT_PATH, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
     }
 
     // check if search is valid
-    bool isValidParent = false;
-    bool isValidChild = false;
-    for (int i = 0; i < nameBufferLen; i++) {
-        if (wcscmp(nameBuffer[i], searchParent) == 0) {
-            isValidParent = true;
-        }
-
-        if (wcscmp(nameBuffer[i], searchChild) == 0) {
-            isValidChild = true;
-        }
-    }
+    bool isValidParent = palNameIdxByName.find(searchParent) != palNameIdxByName.end();
+    bool isValidChild = palNameIdxByName.find(searchChild) != palNameIdxByName.end();
     
     if (isValidParent == false || isValidChild == false) {
         wcout << L"교배식에 존재하지 않는 종류입니다." << endl;
@@ -459,7 +448,7 @@ void PrintShortestPath(const wchar_t* searchParent,
       
     // construct node
     int nodeNum;
-    isSuccess = ConstructNode(nodeBuffer, combBuffer, nameBuffer, &errMsg);
+    isSuccess = ConstructNode(nodeBuffer, combBuffer, &errMsg);
     if (isSuccess == false) {
         wcout << errMsg << endl;
         return;
@@ -495,13 +484,16 @@ int main()
     std::locale::global(std::locale("ko_KR.UTF-8"));
     _wsetlocale(LC_ALL, L"korean");
     
+    // init
     vector<Comb> combBuffer;
     vector<Node> nodeBuffer;
     vector<Link> linkBuffer;
     Queue<int> recycleLinkIdxQ;
 
-    const int nameBufferCapacity = 300;
-    wchar_t (*nameBuffer)[NAME_LEN] = new wchar_t[nameBufferCapacity][NAME_LEN];
+    map<const wchar_t*, int, CmpStr> palNameIdxByName;
+    for (int i = 0; i < PAL_LEN; i++) {
+        palNameIdxByName.insert({ PAL_NAMES[i], i });
+    }
 
     // summary
     wcout << L"------------ <설명> ------------"<< endl
@@ -512,7 +504,7 @@ int main()
 
     // input
     while (true) {
-        int maxLinkNum = 10;
+        int maxLinkNum = 8;
 
         wchar_t searchParent[NAME_LEN];
         wchar_t searchChild[NAME_LEN];
@@ -531,10 +523,8 @@ int main()
         wcout << L"------------결과------------" << endl;
         
         // output
-        PrintShortestPath(searchParent, searchChild, nameBuffer, nameBufferCapacity, combBuffer, nodeBuffer, linkBuffer, recycleLinkIdxQ, maxLinkNum);
+        PrintShortestPath(searchParent, searchChild, palNameIdxByName, combBuffer, nodeBuffer, linkBuffer, recycleLinkIdxQ, maxLinkNum);
         wcout << L"----------------------------" << endl << endl;
     }      
-    
-    // dealloc
-    delete[] nameBuffer;
+   
 }

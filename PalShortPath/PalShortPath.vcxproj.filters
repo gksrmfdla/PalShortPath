@@ -23,5 +23,8 @@
     <ClInclude Include="Queue.hpp">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="PalNameConst.hpp">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
