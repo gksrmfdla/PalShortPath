@@ -181,6 +181,7 @@ static const wchar_t* PAL_NAMES[]{
     L"빙호우거",
     L"플럼린",
     L"멀보냥",
-    L"러시골드",
+    L"러시골드"
+
 };
 static constexpr int PAL_LEN = sizeof(PAL_NAMES) / sizeof(wchar_t*);

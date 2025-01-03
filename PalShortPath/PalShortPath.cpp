@@ -325,7 +325,7 @@ bool SearchShortestPaths(vector<int>& pFindedLinkIdxs,
         Link link = linkBuffer[linkIdx];
 
         // exceed link num
-        if (link.linkNum >= maxLinkNum
+        if (link.linkNum > maxLinkNum
             || (isFind && link.linkNum > findedLinkNum)) {
             continue;
         }
