@@ -14,6 +14,7 @@ using namespace std;
 static const int NAME_LEN = 32;
 static const wchar_t* DELIMITER = L"+= ";
 static const wchar_t* INPUT_PATH = L"./교배식.txt";
+static const wchar_t* DUPLICATE_NAME = L"DUPLICATED";
 static const int MAX_PAL_NUM = 200;
 
 struct CmpStr
@@ -280,9 +281,9 @@ bool ReadFile(vector<Comb>& combs, map<const wchar_t*, int, CmpStr>& palNameIdxB
 
 
     for (int i = 0; i < duplicateCombIndices.size(); i++) {
-        combs[duplicateCombIndices[i]].parents[0] = L"removed";
-        combs[duplicateCombIndices[i]].parents[1] = L"removed";
-        combs[duplicateCombIndices[i]].child = L"removed";
+        combs[duplicateCombIndices[i]].parents[0] = DUPLICATE_NAME;
+        combs[duplicateCombIndices[i]].parents[1] = DUPLICATE_NAME;
+        combs[duplicateCombIndices[i]].child = DUPLICATE_NAME;
     }
 
     file.close();
@@ -308,8 +309,11 @@ bool ConstructNode(Node* nodes, map<const wchar_t*, int, CmpStr>& palNameIdxByNa
 
         for (int parentIdx = 0; parentIdx < parentNum; parentIdx++) {
             int findNodeIdx = FindNodeIdx(palNameIdxByName, comb.parents[parentIdx]);
+            if (findNodeIdx == -1) {
+                continue;
+            }
 
-            Node& findedNode = nodes[findNodeIdx];
+            Node& findedNode = nodes[findNodeIdx];            
             findedNode.breeds[findedNode.breedNum].spouse = comb.parents[parentIdx == 0 ? 1 : 0];
             findedNode.breeds[findedNode.breedNum].child = comb.child;
             findedNode.breedNum++;
@@ -572,7 +576,7 @@ int main()
     int* reachLinkNums = new int[PAL_LEN];
 
     map<const wchar_t*, int, CmpStr> palNameIdxByName;
-    for (int i = 0; i < PAL_LEN; i++) {
+    for (int i = 0; i < PAL_LEN; i++) {        
         palNameIdxByName.insert({ PAL_NAMES[i], i });
     }
 
